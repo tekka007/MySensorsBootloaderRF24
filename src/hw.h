@@ -45,8 +45,13 @@ static inline void flash_buffer_fill(uint16_t address, uint16_t data) {
 	__boot_page_fill_short(address, data);
 }
 void flash_page_program(uint16_t page);
-// CRC16 of the first len bytes of flash (never reads into the bootloader section)
-uint16_t flash_crc(uint16_t len);
+// CRC16 of the first `blocks` firmware blocks (FIRMWARE_BLOCK_SIZE bytes each) of flash, never reads into the bootloader section
+uint16_t flash_crc(uint16_t blocks);
+
+// EEPROM. Smaller than the avr-libc routines because interrupts are never enabled in the bootloader.
+void eeprom_put(uint16_t address, uint8_t value);		// only writes when the value differs
+void eeprom_put_block(uint16_t address, const uint8_t *buf, uint8_t len);
+void eeprom_get_block(uint16_t address, void *buf, uint8_t len);
 
 void led_blink(void);
 

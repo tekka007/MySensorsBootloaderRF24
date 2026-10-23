@@ -1,7 +1,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <avr/eeprom.h>
 #include <util/delay.h>
 #include "bootloader.h"
 #include "hw.h"
@@ -44,17 +43,15 @@ typedef enum {
 	BL_RUN
 } bl_state_t;
 
-uint8_t mys_reset_flags;
+uint8_t mys_reset_flags NOINIT;
 
-static MyMessage out_msg;
-static MyMessage in_msg;
-static nodeConfig_t node_config;
-static uint8_t configured_parent_id;
+static MyMessage out_msg NOINIT;
+static MyMessage in_msg NOINIT;
+static nodeConfig_t node_config NOINIT;
+static uint8_t configured_parent_id NOINIT;
 
 void mys_save_firmware_config(const uint8_t *config) {
-	for (uint8_t i = 0; i < sizeof(nodeFirmwareConfig_t); i++) {
-		eeprom_update_byte((uint8_t *)(EEPROM_FIRMWARE_TYPE_ADDRESS + i), *config++);
-	}
+	eeprom_put_block(EEPROM_FIRMWARE_TYPE_ADDRESS, config, sizeof(nodeFirmwareConfig_t));
 }
 
 // message building ------------------------------------------------------------------------------------------------------
@@ -146,6 +143,14 @@ static bool send_process_type(const uint8_t response_type, uint8_t retries) {
 	return response;
 }
 
+// True if the two buffers differ (smaller than libc memcmp, which would be linked in just for this)
+static bool differ(const uint8_t *a, const uint8_t *b, uint8_t len) {
+	while (len--) {
+		if (*a++ != *b++) return true;
+	}
+	return false;
+}
+
 // One byte atoi, smaller than the libc version
 static uint8_t byte_atoi(const char *str, uint8_t len) {
 	uint8_t result = 0;
@@ -174,11 +179,10 @@ void mys_loader_run(void) {
 		switch (state) {
 		case BL_READ_CONFIG:
 			DEBUG_STATE(DEBUG_READ_CONFIG);
-			eeprom_busy_wait();
 			// node id, parent node id, distance
-			eeprom_read_block(&node_config, (uint8_t *)EEPROM_NODE_ID_ADDRESS, sizeof(nodeConfig_t));
+			eeprom_get_block(EEPROM_NODE_ID_ADDRESS, &node_config, sizeof(nodeConfig_t));
 			// firmware type, version, CRC, blocks
-			eeprom_read_block(&fw_config, (uint8_t *)EEPROM_FIRMWARE_TYPE_ADDRESS, sizeof(nodeFirmwareConfig_t));
+			eeprom_get_block(EEPROM_FIRMWARE_TYPE_ADDRESS, &fw_config, sizeof(nodeFirmwareConfig_t));
 			// without a working radio proceed to the startup check
 			state = rf24_init() ? BL_FIND_PARENTS : BL_RUN;
 			break;
@@ -214,7 +218,7 @@ void mys_loader_run(void) {
 					#else
 						const uint8_t new_id = byte_atoi(in_msg.payload.data, mGetLength(in_msg));
 					#endif
-					eeprom_update_byte((uint8_t *)EEPROM_NODE_ID_ADDRESS, new_id);
+					eeprom_put(EEPROM_NODE_ID_ADDRESS, new_id);
 					state = BL_READ_CONFIG;
 				}
 			} else {
@@ -232,23 +236,23 @@ void mys_loader_run(void) {
 			build_message(C_INTERNAL, I_SIGNING_PRESENTATION, P_CUSTOM, 2);
 			(void)send_process_type(I_SIGNING_PRESENTATION, 0);
 			// refresh the CRC in case of memory corruption or a failed transmission
-			fw_config.crc = flash_crc(fw_config.blocks * FIRMWARE_BLOCK_SIZE);
+			fw_config.crc = flash_crc(fw_config.blocks);
 			(void)memcpy(config_request, &fw_config, sizeof(nodeFirmwareConfig_t));
 			config_request->BLVersion = MYSBOOTLOADER_VERSION;
 			build_message(C_STREAM, ST_FIRMWARE_CONFIG_REQUEST, P_CUSTOM, sizeof(requestFirmwareConfig_t));
 			if (send_process_type(ST_FIRMWARE_CONFIG_RESPONSE, 3)) {
 				DEBUG_STATE(DEBUG_CONFIG_RECEIVED);
-				if (memcmp(&fw_config, in_msg.payload.data, sizeof(nodeFirmwareConfig_t))) {
+				if (differ((const uint8_t *)&fw_config, (const uint8_t *)in_msg.payload.data, sizeof(nodeFirmwareConfig_t))) {
 					#ifdef BOOTLOADER_COMMANDS
 					if (!config_response->blocks && config_response->crc == BL_CMD_MAGIC) {
 						const uint16_t command = config_response->type_command.bl_command;
 						if (command == BL_CMD_CLEAR_EEPROM) {
 							for (uint16_t i = 0; i < EEPROM_SIZE; i++) {
-								eeprom_update_byte((uint8_t *)i, EEPROM_ERASED_BYTE);
+								eeprom_put(i, EEPROM_ERASED_BYTE);
 							}
 						} else if (command == BL_CMD_NODE_ID || command == BL_CMD_PARENTNODE_ID) {
 							// 0x02 sets the node id, 0x03 the parent id (adjacent EEPROM bytes)
-							eeprom_update_byte((uint8_t *)(EEPROM_NODE_ID_ADDRESS + command - 2),
+							eeprom_put(EEPROM_NODE_ID_ADDRESS + command - 2,
 							                   (uint8_t)config_response->version_data.bl_data);
 						}
 						state = BL_READ_CONFIG;
@@ -286,7 +290,7 @@ void mys_loader_run(void) {
 			build_message(C_STREAM, ST_FIRMWARE_REQUEST, P_CUSTOM, sizeof(requestFirmwareBlock_t));
 			// the firmware is loaded counting backwards
 			if (send_process_type(ST_FIRMWARE_RESPONSE, MAX_FIRMWARE_REQUEST_RESEND)) {
-				if (!memcmp(block_request, block_response, sizeof(requestFirmwareBlock_t))) {
+				if (!differ((const uint8_t *)block_request, (const uint8_t *)block_response, sizeof(requestFirmwareBlock_t))) {
 					const uint8_t offset = ((requested_block - 1) * FIRMWARE_BLOCK_SIZE) % SPM_PAGESIZE;
 					for (uint8_t i = 0; i < FIRMWARE_BLOCK_SIZE; i += 2) {
 						flash_buffer_fill(offset + i, block_response->data[i] | block_response->data[i + 1] << 8);
@@ -299,7 +303,7 @@ void mys_loader_run(void) {
 					if (!requested_block) {
 						// last block received: validate the firmware CRC
 						fw_config.crc = new_firmware_crc;
-						if (flash_crc(fw_config.blocks * FIRMWARE_BLOCK_SIZE) != new_firmware_crc) {
+						if (flash_crc(fw_config.blocks) != new_firmware_crc) {
 							// invalid firmware: 0 blocks, whose CRC evaluates to 0xFFFF
 							fw_config.blocks = 0u;
 							fw_config.crc = 0u;
@@ -316,7 +320,7 @@ void mys_loader_run(void) {
 		case BL_RUN:
 			DEBUG_STATE(DEBUG_PREPARE_RUN);
 			// verify the flash CRC against the one stored in EEPROM
-			if (flash_crc(fw_config.blocks * FIRMWARE_BLOCK_SIZE) == fw_config.crc) {
+			if (flash_crc(fw_config.blocks) == fw_config.crc) {
 				DEBUG_STATE(DEBUG_RUN);
 				spi_close();
 				#ifdef WATCHDOG_ON_SKETCH_START
@@ -327,7 +331,7 @@ void mys_loader_run(void) {
 				// hand the reset flags to the application in r2 (retrieved there using .init0)
 				__asm__ __volatile__ ("mov r2, %0\n" :: "r" (mys_reset_flags));
 				// run the application
-				((void (*)())0)();
+				__asm__ __volatile__ ("jmp 0\n");
 			}
 			// CRC invalid, start over
 			state = BL_READ_CONFIG;

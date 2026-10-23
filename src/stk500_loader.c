@@ -96,7 +96,7 @@ void stk500_loader_run(void) {
 			config.type_command.type = 0xFFFF;
 			config.version_data.version = 0xFFFF;
 			config.blocks = fw_len / FIRMWARE_BLOCK_SIZE;
-			config.crc = flash_crc(fw_len);
+			config.crc = flash_crc(config.blocks);
 			mys_save_firmware_config((const uint8_t *)&config);
 			done = true;
 			verify_space();

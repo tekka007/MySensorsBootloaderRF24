@@ -20,7 +20,7 @@
 	#define RF24_PA_LEVEL		RF24_PA_MAX		// RF24_PA_MIN=-18dBm, RF24_PA_LOW=-12dBm, RF24_PA_HIGH=-6dBm, RF24_PA_MAX=0dBm
 #endif
 #define RF24_ADDR_WIDTH		(5)
-#define RF24_BASE_RADIO_ID	0x00,0xFC,0xE1,0xA8,0xA8
+#define RF24_BASE_RADIO_ID_TAIL	0xFC,0xE1,0xA8,0xA8	// network address; the first address byte is the node id
 #define RF24_ARC			(15)			// Auto Retransmit Counts, see nRF24L01+ data sheet
 #define RF24_ARD			(5)				// Auto Retransmit Delay, 5=1500us, see nRF24L01+ data sheet
 
@@ -58,6 +58,8 @@
 #ifndef LED_PORT
 	#define LED_PORT	PORTB
 #endif
+// Writing a 1 to a PINx bit toggles the matching PORTx bit (ATmega328p), which is a single instruction
+#define LED_TOGGLE()	(_SFR_IO8(_SFR_IO_ADDR(LED_PORT) - 2) = _BV(LED_PIN))
 #ifndef LED_PIN
 	#define LED_PIN		PINB5				// NRFDuino uses pin 9 (PB1): build with -DLED_PIN=PINB1
 #endif

@@ -48,7 +48,7 @@ if(BOOTLOADER_DEBUG)
 endif()
 
 target_compile_options(bootloader PRIVATE
-  -mmcu=${MCU} -std=gnu99 -Os -flto -mrelax -ffunction-sections -fdata-sections -fpack-struct -fshort-enums
+  -mmcu=${MCU} -std=gnu99 -Os -flto -mrelax -fno-reorder-blocks -fno-tree-dominator-opts -ffunction-sections -fdata-sections -fpack-struct -fshort-enums
   -funsigned-char -funsigned-bitfields -Wall -Wextra -Wundef -pedantic)
 target_link_options(bootloader PRIVATE
   -mmcu=${MCU} -nostartfiles -Os -mrelax -Wl,--gc-sections -Wl,-static
@@ -59,5 +59,5 @@ target_link_libraries(bootloader PRIVATE m)
 add_custom_command(TARGET bootloader POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} -O ihex -R .eeprom $<TARGET_FILE:bootloader> $<TARGET_FILE_BASE_NAME:bootloader>.hex
   COMMAND ${CMAKE_COMMAND} -DELF=$<TARGET_FILE:bootloader> -DLIMIT=${BOOTLOADER_SIZE}
-          -DSIZE_TOOL=${CMAKE_SIZE_UTIL} -DENFORCE=${SIZE_CHECK} -P ${CMAKE_SOURCE_DIR}/cmake/check_size.cmake
+          -DSIZE_TOOL=${CMAKE_SIZE_UTIL} -DNM_TOOL=${CMAKE_NM} -DENFORCE=${SIZE_CHECK} -P ${CMAKE_SOURCE_DIR}/cmake/check_size.cmake
   VERBATIM)

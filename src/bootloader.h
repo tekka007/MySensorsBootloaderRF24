@@ -19,6 +19,10 @@
 #define BOOTLOADER_SIZE				(2048)
 #define BOOTLOADER_START_ADDRESS	(0x8000 - BOOTLOADER_SIZE)
 
+// Variables in .noinit are neither zeroed nor initialised, which removes the startup code (__do_clear_bss and
+// __do_copy_data). Every variable placed there is written before it is read.
+#define NOINIT __attribute__((section(".noinit")))
+
 #define FIRMWARE_BLOCK_SIZE			(16)
 #define EEPROM_SIZE					(1024)		// ATmega328p
 

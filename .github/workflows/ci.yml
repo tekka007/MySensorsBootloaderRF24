@@ -48,3 +48,20 @@ jobs:
             cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/avr-gcc.cmake -DF_CPU=16000000L $opts
             cmake --build build
           done
+
+  simulator:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        f_cpu: [16000000, 8000000, 1000000]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain and simulator
+        run: sudo apt-get update && sudo apt-get install -y gcc-avr avr-libc binutils-avr cmake libsimavr-dev libelf-dev
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/avr-gcc.cmake -DF_CPU=${{ matrix.f_cpu }}L
+          cmake --build build
+      - name: Run bootloader in simavr
+        run: tests/sim/run.sh build/MYSBootloader.*.elf ${{ matrix.f_cpu }}

@@ -114,14 +114,25 @@ void flash_page_program(const uint16_t page) {
 }
 
 static uint16_t crc16_update(uint16_t crc, const uint8_t data) {
-	crc ^= data;
-	for (uint8_t i = 0; i < 8; ++i) {
-		crc = (crc >> 1) ^ (-(int16_t)(crc & 1) & 0xA001);
-	}
+	uint8_t count, mask_lo, mask_hi;
+	__asm__ (
+		"eor %A0, %4\n"
+		"ldi %1, 8\n"
+		"ldi %2, 0x01\n"
+		"ldi %3, 0xA0\n"
+		"1: lsr %B0\n"
+		"ror %A0\n"
+		"brcc 2f\n"
+		"eor %B0, %3\n"
+		"eor %A0, %2\n"
+		"2: dec %1\n"
+		"brne 1b\n"
+		: "+r" (crc), "=&d" (count), "=&d" (mask_lo), "=&d" (mask_hi)
+		: "r" (data));
 	return crc;
 }
-
-uint16_t flash_crc(const uint16_t len) {
+uint16_t flash_crc(const uint16_t blocks) {
+	const uint16_t len = blocks * FIRMWARE_BLOCK_SIZE;
 	uint16_t crc = 0xFFFF;
 	uint16_t address = 0x0000;
 	// stop at the bootloader section, also prevents overflow
@@ -134,13 +145,44 @@ uint16_t flash_crc(const uint16_t len) {
 	return crc;
 }
 
+// EEPROM --------------------------------------------------------------------------------------------------------------
+
+static uint8_t eeprom_get(const uint16_t address) {
+	while (EECR & _BV(EEPE));
+	EEAR = address;
+	EECR = _BV(EERE);
+	return EEDR;
+}
+
+void eeprom_put(const uint16_t address, const uint8_t value) {
+	if (eeprom_get(address) != value) {
+		// EEPM = 00: erase and write in one operation. EEPE has to be set within 4 cycles of EEMPE.
+		EEDR = value;
+		EECR = _BV(EEMPE);
+		EECR = _BV(EEPE);
+	}
+}
+
+void eeprom_put_block(uint16_t address, const uint8_t *buf, uint8_t len) {
+	while (len--) {
+		eeprom_put(address++, *buf++);
+	}
+}
+
+void eeprom_get_block(uint16_t address, void *buf, uint8_t len) {
+	uint8_t *dst = buf;
+	while (len--) {
+		*dst++ = eeprom_get(address++);
+	}
+}
+
 // LED -----------------------------------------------------------------------------------------------------------------
 
 void led_blink(void) {
 	LED_DDR |= _BV(LED_PIN);
 	// 300 ms total
 	for (uint8_t i = 0; i < 6; i++) {
-		LED_PORT ^= _BV(LED_PIN);
+		LED_TOGGLE();
 		_delay_ms(50);
 	}
 }

@@ -15,6 +15,7 @@ boot section of an ATmega328p, updates the application over the nRF24 radio, and
 | `third_party/` | `boot.h`, the avr-libc SPM helpers with the short-form page operations used here. |
 | `cmake/` | AVR toolchain file and the image size check. |
 | `tools/build_variants.sh` | Builds every clock/channel/PA-level image. |
+| `tests/sim/` | Regression tests that run the bootloader in simavr against an emulated nRF24 and controller. |
 | `hex/` | Ready-made default images, see below. |
 | `arduino/boards.txt` | Board definition for the Arduino IDE. |
 
@@ -104,6 +105,27 @@ avrdude -c usbasp -p m328p -Uflash:w:build/MYSBootloader.ch110.16000000L.RF24_PA
 
 ## Development notes
 
-The image has only 14 to 38 bytes of headroom depending on the configuration, so size matters. That is why the sources are linked with `-flto` and small
-helpers stay `static`: check `cmake --build` output (`bootloader flash use: N of 2048 bytes`) after every change.
-CI builds the default configurations on each push.
+The image must fit in 2048 bytes and currently uses 1872 to 1940 bytes depending on the configuration, so size matters:
+check the `bootloader flash use: N of 2048 bytes` line of `cmake --build` after every change. The build also fails if
+`main` is not the first code in the boot section (the reset vector jumps there), which happens if data such as a
+`PROGMEM` table is placed in front of it.
+
+Size techniques in use: the sources are linked with `-flto`; all variables live in `.noinit` so no `.data`/`.bss`
+startup code is linked in (every variable is written before it is read); EEPROM access, the CRC loop and the buffer
+comparison are small hand-sized routines instead of libc calls; `main` is `OS_main` in `.init9` and the application is
+started with a plain `jmp 0`.
+
+### Tests
+
+`tests/sim/run.sh <elf> <F_CPU>` runs the bootloader in [simavr](https://github.com/buserror/simavr) against an emulated
+nRF24L01+ and a scripted MySensors controller. It covers a full OTA update (64 blocks, CRC check, start of the new
+application), an up-to-date node, a firmware with a wrong CRC, a firmware config with zero blocks, the bootloader
+commands and a serial STK500 programming session. It needs `simavr`, `libsimavr-dev` and `libelf-dev`:
+
+```sh
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/avr-gcc.cmake -DF_CPU=8000000L
+cmake --build build
+tests/sim/run.sh build/MYSBootloader.ch110.8000000L.RF24_PA_MAX.elf 8000000
+```
+
+CI builds all configurations and runs these tests for every clock.
