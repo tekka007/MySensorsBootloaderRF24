@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds bootloader variants for every clock/channel/power level into ./compiled.
-# Generated sources and objects live in ./build; checked-in MYSBootloader.c and Makefile are not touched.
+# MYSBootloader.c and Makefile are copied into ./build with the channel, PA level, clock and baud rate lines rewritten;
+# the checked-in files are not touched.
 set -u
 cd "$(dirname "$0")"
 
@@ -23,8 +24,10 @@ do
     do
       echo "Frequency: $f Channel: $i Baud rate: $baudrate Power level: $p"
       out="compiled/MYSBootloader.ch$i.$f.$p.hex"
-      sed -e "s/\${channel}/$i/" -e "s/\${power}/$p/" MYSBootloader.c.original > build/MYSBootloader.c
-      sed -e "s/\${frequency}/$f/" -e "s/\${baudrate}/$baudrate/" Makefile.original > build/Makefile
+      sed -E -e "s/^(#define[[:space:]]+RF24_CHANNEL[[:space:]]+)\([0-9]+\)/\1($i)/" \
+           -e "s/^(#define[[:space:]]+RF24_PA_LEVEL[[:space:]]+)RF24_PA_[A-Z]+/\1$p/" MYSBootloader.c > build/MYSBootloader.c
+      sed -E -e "s/^(CLK[[:space:]]*=[[:space:]]*).*/\1$f/" \
+           -e "s/^(BAUDRATE[[:space:]]*=[[:space:]]*).*/\1$baudrate/" Makefile > build/Makefile
       if ! make -C build; then
         echo "Build failed!!"
         rm -f "$out"
