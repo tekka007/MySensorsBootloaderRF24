@@ -33,7 +33,7 @@ static uint8_t write_byte(const uint8_t cmd, uint8_t value) {
 	return spi_bytes(cmd, &value, 1, false);
 }
 
-static uint8_t read_byte(const uint8_t cmd) {
+NOINLINE static uint8_t read_byte(const uint8_t cmd) {
 	uint8_t value;
 	return spi_bytes(cmd, &value, 1, true);
 }
@@ -70,7 +70,7 @@ static bool write_payload(uint8_t *buf, const uint8_t len) {
 	return status & _BV(TX_DS);
 }
 
-static void set_pipe_address(const uint8_t pipe) {
+NOINLINE static void set_pipe_address(const uint8_t pipe) {
 	(void)spi_bytes(pipe | W_REGISTER, base_addr, RF24_ADDR_WIDTH, false);
 }
 

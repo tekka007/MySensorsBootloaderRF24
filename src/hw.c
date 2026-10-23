@@ -5,7 +5,7 @@
 
 // Watchdog ------------------------------------------------------------------------------------------------------------
 
-void wdt_configure(const uint8_t config) {
+NOINLINE void wdt_configure(const uint8_t config) {
 	WDTCSR = _BV(WDCE) | _BV(WDE);
 	WDTCSR = config;
 }

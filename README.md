@@ -105,7 +105,7 @@ avrdude -c usbasp -p m328p -Uflash:w:build/MYSBootloader.ch110.16000000L.RF24_PA
 
 ## Development notes
 
-The image must fit in 2048 bytes and currently uses 1872 to 1940 bytes depending on the configuration, so size matters:
+The image must fit in 2048 bytes and currently uses 1838 to 1912 bytes depending on the configuration, so size matters:
 check the `bootloader flash use: N of 2048 bytes` line of `cmake --build` after every change. The build also fails if
 `main` is not the first code in the boot section (the reset vector jumps there), which happens if data such as a
 `PROGMEM` table is placed in front of it.
