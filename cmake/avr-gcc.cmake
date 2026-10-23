@@ -1,0 +1,7 @@
+set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_PROCESSOR avr)
+set(CMAKE_C_COMPILER avr-gcc)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(CMAKE_SIZE_UTIL avr-size)
+set(CMAKE_OBJCOPY avr-objcopy)
+set(CMAKE_NM avr-nm)
