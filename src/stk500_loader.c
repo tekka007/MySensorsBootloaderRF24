@@ -28,16 +28,15 @@ static void skip_bytes(uint8_t count) {
 	verify_space();
 }
 
-NOINLINE void stk500_loader_run(void) {
+NOINLINE __attribute__((noreturn)) void stk500_loader_run(void) {
 	uint8_t ch;
 	uint16_t address = 0;
 	uint8_t length;
 	uint16_t fw_len = 0;
-	bool done = false;
 
 	uart_init();
 
-	while (!done) {
+	while (1) {
 		wdt_kick();
 		ch = uart_getc();
 
@@ -98,8 +97,11 @@ NOINLINE void stk500_loader_run(void) {
 			R->fw_config.blocks = fw_len / FIRMWARE_BLOCK_SIZE;
 			R->fw_config.crc = flash_crc(R->fw_config.blocks);
 			mys_save_firmware_config();
-			done = true;
 			verify_space();
+			uart_putc(STK_OK);
+			// programming session over: continue like after any other reset, never return (saves the register
+			// save/restore code a returning function needs)
+			mys_loader_run();
 		} else {
 			verify_space();
 		}
