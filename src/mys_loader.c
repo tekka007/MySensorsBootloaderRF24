@@ -83,7 +83,7 @@ static uint8_t process_rx(void) {
 	uint8_t result = I_NO_ANSWER_PSEUDO_COMMAND;
 	if (rf24_data_available()) {
 		// discard faulty transmissions
-		if (rf24_read_message(in_msg.array) != mGetLength(in_msg) + HEADER_SIZE) {
+		if (rf24_read_message(in_msg.array) != (uint8_t)(mGetLength(in_msg) + HEADER_SIZE)) {
 			return result;
 		}
 		if (in_msg.destination == R->node_config.nodeId) {

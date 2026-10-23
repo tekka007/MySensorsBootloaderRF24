@@ -105,12 +105,25 @@ uint8_t uart_getc(void) {
 
 // Flash ---------------------------------------------------------------------------------------------------------------
 
-void flash_page_program(const uint16_t page) {
-	__boot_page_erase_short(page);
-	boot_spm_busy_wait();
-	__boot_page_write_short(page);
-	boot_spm_busy_wait();
-	__boot_rww_enable_short();
+// Erases and writes the flash page whose address is in r25:r24 (the page buffer was filled with flash_buffer_fill()),
+// then re-enables the RWW section. Written in assembly so the three SPM operations share one command-and-wait tail.
+__attribute__((naked)) void flash_page_program(uint16_t page) {
+	__asm__ __volatile__ (
+		"movw r30, r24\n"
+		"ldi r24, %[erase]\n"
+		"rcall 1f\n"
+		"ldi r24, %[write]\n"
+		"rcall 1f\n"
+		"ldi r24, %[rww]\n"
+		"1: out %[spmcsr], r24\n"		/* the SPM must follow within 4 cycles */
+		"spm\n"
+		"2: in r0, %[spmcsr]\n"			/* wait until the operation is done */
+		"sbrc r0, %[spmen]\n"
+		"rjmp 2b\n"
+		"ret\n"
+		:: [spmcsr] "I" (_SFR_IO_ADDR(SPMCSR)), [spmen] "I" (SPMEN),
+		   [erase] "M" (_BV(SPMEN) | _BV(PGERS)), [write] "M" (_BV(SPMEN) | _BV(PGWRT)),
+		   [rww] "M" (_BV(SPMEN) | _BV(RWWSRE)));
 }
 
 static uint16_t crc16_update(uint16_t crc, const uint8_t data) {
