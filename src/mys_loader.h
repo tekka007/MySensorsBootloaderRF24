@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 void mys_loader_run(void) __attribute__((noreturn));
-// Stores a nodeFirmwareConfig_t in EEPROM (only writes bytes that changed)
-void mys_save_firmware_config(const uint8_t *config);
+// Stores the nodeFirmwareConfig_t in the shared RAM struct (R->fw_config) in EEPROM, only writing bytes that changed
+void mys_save_firmware_config(void);
 
 #endif // MYS_LOADER_H

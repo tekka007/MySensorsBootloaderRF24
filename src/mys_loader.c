@@ -47,8 +47,8 @@ typedef enum {
 
 MyMessage in_msg NOINIT;
 
-void mys_save_firmware_config(const uint8_t *config) {
-	eeprom_put_block(EEPROM_FIRMWARE_TYPE_ADDRESS, config, sizeof(nodeFirmwareConfig_t));
+void mys_save_firmware_config(void) {
+	eeprom_put_block(EEPROM_FIRMWARE_TYPE_ADDRESS, (const uint8_t *)&R->fw_config, sizeof(nodeFirmwareConfig_t));
 }
 
 // message building ------------------------------------------------------------------------------------------------------
@@ -275,7 +275,7 @@ NOINLINE void mys_loader_run(void) {
 			new_firmware_crc = R->fw_config.crc;
 			// invalidate the CRC and save the new details, so an interrupted transfer is detected on restart
 			R->fw_config.crc = 0xFFFF;
-			mys_save_firmware_config((const uint8_t *)&R->fw_config);
+			mys_save_firmware_config();
 			requested_block = R->fw_config.blocks;
 			break;
 
@@ -305,7 +305,7 @@ NOINLINE void mys_loader_run(void) {
 							R->fw_config.blocks = 0u;
 							R->fw_config.crc = 0u;
 						}
-						mys_save_firmware_config((const uint8_t *)&R->fw_config);
+						mys_save_firmware_config();
 						state = BL_READ_CONFIG;
 					}
 				}
