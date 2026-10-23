@@ -264,7 +264,8 @@ static void MySensorsBootloader(void) {
 					#endif
 					{		
 						// update needed, do not allow writing to bootloader section, i.e. max block < 0x7800 / 0x10 = 0x780 = 1920
-						if (firmwareConfigResponse->blocks < (BOOTLOADER_START_ADDRESS/FIRMWARE_BLOCK_SIZE)) {
+						// blocks == 0 would make the update loop request block 0xFFFF and wrap the flash address
+						if (firmwareConfigResponse->blocks && firmwareConfigResponse->blocks < (BOOTLOADER_START_ADDRESS/FIRMWARE_BLOCK_SIZE)) {
 							// save received firmware config
 							(void)memcpy(&_eepromNodeFirmwareConfig,_inMsg.payload.data,sizeof(nodeFirmwareConfig_t));
 							BL_STATE = BL_INIT_UPDATE;
