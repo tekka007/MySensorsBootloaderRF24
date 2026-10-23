@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        f_cpu: [16000000L, 8000000L, 1000000L]
+        spi_pins:
+          - SPI_PINS_CE9_CSN10
+          - SPI_PINS_CSN7_CE8
+          - SPI_PINS_CE7_CSN8
+          - SPI_PINS_CE7_CSN10
+          - SPI_PINS_CE4_CSN10
+          - SPI_PINS_CE10_CSN9
+          - SPI_PINS_CE4_CSN5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-avr avr-libc binutils-avr cmake
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/avr-gcc.cmake
+          -DF_CPU=${{ matrix.f_cpu }} -DSPI_PINS=${{ matrix.spi_pins }}
+      - name: Build (fails if the image exceeds 2048 bytes)
+        run: cmake --build build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MYSBootloader-${{ matrix.f_cpu }}-${{ matrix.spi_pins }}
+          path: build/*.hex
+
+  options:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-avr avr-libc binutils-avr cmake
+      - name: Feature combinations still fit
+        run: |
+          for opts in "-DBOOTLOADER_COMMANDS=OFF" "-DWATCHDOG_ON_SKETCH_START=OFF" "-DBOOTLOADER_DEBUG=ON" \
+                      "-DDATARATE=RF24_2MBPS -DPA_LEVEL=RF24_PA_MIN -DCHANNEL=1"; do
+            rm -rf build
+            cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/avr-gcc.cmake -DF_CPU=16000000L $opts
+            cmake --build build
+          done

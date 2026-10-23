@@ -1,5 +1,6 @@
-.map
-MYSBootloader.d
-MYSBootloader.elf
-MYSBootloader.o
 build/
+out/
+*.elf
+*.map
+*.o
+*.d
