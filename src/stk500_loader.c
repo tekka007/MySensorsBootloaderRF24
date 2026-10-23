@@ -8,6 +8,7 @@
 #include "bootloader.h"
 #include "hw.h"
 #include "mys_loader.h"
+#include "ram.h"
 #include "stk500_loader.h"
 #include "stk500_protocol.h"
 
@@ -27,7 +28,7 @@ static void skip_bytes(uint8_t count) {
 	verify_space();
 }
 
-void stk500_loader_run(void) {
+NOINLINE void stk500_loader_run(void) {
 	uint8_t ch;
 	uint16_t address = 0;
 	uint8_t length;
@@ -92,12 +93,11 @@ void stk500_loader_run(void) {
 			uart_putc(SIGNATURE_2);
 		} else if (ch == STK_LEAVE_PROGMODE) {
 			// type and version are not transferred by STK500, store 0xFFFF
-			nodeFirmwareConfig_t config;
-			config.type_command.type = 0xFFFF;
-			config.version_data.version = 0xFFFF;
-			config.blocks = fw_len / FIRMWARE_BLOCK_SIZE;
-			config.crc = flash_crc(config.blocks);
-			mys_save_firmware_config((const uint8_t *)&config);
+			R->fw_config.type_command.type = 0xFFFF;
+			R->fw_config.version_data.version = 0xFFFF;
+			R->fw_config.blocks = fw_len / FIRMWARE_BLOCK_SIZE;
+			R->fw_config.crc = flash_crc(R->fw_config.blocks);
+			mys_save_firmware_config((const uint8_t *)&R->fw_config);
 			done = true;
 			verify_space();
 		} else {

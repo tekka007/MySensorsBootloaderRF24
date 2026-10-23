@@ -48,7 +48,7 @@ if(BOOTLOADER_DEBUG)
 endif()
 
 target_compile_options(bootloader PRIVATE
-  -mmcu=${MCU} -std=gnu99 -Os -flto -mrelax -fno-reorder-blocks -fno-tree-dominator-opts -ffunction-sections -fdata-sections -fpack-struct -fshort-enums
+  -mmcu=${MCU} -std=gnu99 -Os -flto -mrelax -fno-reorder-blocks -fno-tree-dominator-opts -fno-tree-fre -mstrict-X -ffixed-r28 -ffixed-r29 -ffunction-sections -fdata-sections -fpack-struct -fshort-enums
   -funsigned-char -funsigned-bitfields -Wall -Wextra -Wundef -pedantic)
 target_link_options(bootloader PRIVATE
   -mmcu=${MCU} -nostartfiles -Os -mrelax -Wl,--gc-sections -Wl,-static

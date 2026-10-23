@@ -19,14 +19,19 @@
 #include "bootloader.h"
 #include "hw.h"
 #include "mys_loader.h"
+#include "ram.h"
 #include "stk500_loader.h"
+
+// The one instance of the bootloader RAM; R (the Y register) points at it for the whole run.
+static bl_ram_t bl_ram NOINIT;
 
 int main(void) __attribute__ ((OS_main, used, section (".init9")));
 
 int main(void) {
 	__asm__ volatile ("clr __zero_reg__");
+	R = &bl_ram;
 	// save the reset cause for the application, then clear it
-	mys_reset_flags = MCUSR;
+	R->reset_flags = MCUSR;
 	MCUSR = 0;
 	wdt_configure(WDT_TIMEOUT);
 	#ifdef DEBUG
@@ -36,7 +41,7 @@ int main(void) {
 	// signal startup
 	led_blink();
 	// the serial STK500 loader runs only after an external reset or power on
-	if (mys_reset_flags & _BV(EXTRF)) {
+	if (R->reset_flags & _BV(EXTRF)) {
 		stk500_loader_run();
 	}
 	mys_loader_run();
