@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## v1.4.0-rc.1
 
+- Version 1.4: the bootloader version reported to the controller in the firmware config request (`BLVersion`) is now
+  `0x0104`.
 - Sources moved to `src/` and split into `.c`/`.h` units (`hw`, `rf24`, `stk500_loader`, `mys_loader`); unused MySensors
   sensor/data enums and the shadowed `string.h` removed, state names and globals cleaned up.
 - Build moved from the hand-edited `Makefile` to CMake. All settings (clock, baud rate, channel, PA level, data rate,
@@ -10,7 +12,7 @@
 - Fixed `multicompile.sh` never changing the PA level, so every `compiled/*` MIN/LOW/HIGH image was a MAX image.
   The `compiled/` directory is gone; build the variant you need or let CI build all of them.
 - A firmware config with `blocks == 0` is no longer accepted as an update (it requested block `0xFFFF`).
-- Image size reduced from 2000-2034 to 1654-1730 bytes (the default configurations dropped by about 300 bytes, 15%):
+- Image size reduced from 2000-2034 to 1664-1740 bytes (the default configurations dropped by about 300 bytes, 15%):
   no `.data`/`.bss` startup code, all RAM in one struct addressed through a reserved Y register, EEPROM routines and the
   SPM sequence in assembly, a serial loader that continues instead of returning, own small routines instead of libc,
   and tuned compiler options. The build now also verifies that `main` sits at the start of the boot section. See

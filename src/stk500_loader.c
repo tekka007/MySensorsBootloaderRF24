@@ -44,8 +44,13 @@ NOINLINE __attribute__((noreturn)) void stk500_loader_run(void) {
 			ch = uart_getc();
 			verify_space();
 			// 0x81 = major version (out-of-sequence numbering to prevent collisions, see optiboot source),
-			// 0x82 = minor version, anything else is answered with 3 (the compiler folds the common case)
-			uart_putc(ch == 0x81 ? MYSBOOTLOADER_MAJVER + 100 : (ch == 0x82 ? MYSBOOTLOADER_MINVER : 3));
+			// 0x82 = minor version, anything else is answered with 3
+			{
+				uint8_t reply = 3;
+				if (ch == 0x82) reply = MYSBOOTLOADER_MINVER;
+				if (ch == 0x81) reply = MYSBOOTLOADER_MAJVER + 100;
+				uart_putc(reply);
+			}
 		} else if (ch == STK_SET_DEVICE) {
 			skip_bytes(20);
 		} else if (ch == STK_SET_DEVICE_EXT) {

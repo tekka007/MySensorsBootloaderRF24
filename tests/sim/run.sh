@@ -76,7 +76,7 @@ check cmd_clear "EEPROM cleared" 'ee_ff_count=10(23|24)'
 
 echo "serial STK500 session"
 run stk 10
-check stk "sync, version, signature, page read back" 'uart: 14 10 14 03 10 14 65 10 .* 14 1e 95 0f 10 .* 01 08 0f 16 1d 24 2b 32 39 40 47 4e 55 5c 63 6a 10'
+check stk "sync, version, signature, page read back" 'uart: 14 10 14 04 10 14 65 10 .* 14 1e 95 0f 10 .* 01 08 0f 16 1d 24 2b 32 39 40 47 4e 55 5c 63 6a 10'
 check stk "firmware config saved (16 blocks, CRC 469a)" 'fwcfg=ff ff ff ff 10 00 9a 46'
 
 [ "$failed" -eq 0 ] && echo "all simulator checks passed" || echo "SIMULATOR CHECKS FAILED"

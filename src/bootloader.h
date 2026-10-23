@@ -12,7 +12,7 @@
 
 // version
 #define MYSBOOTLOADER_MAJVER 1
-#define MYSBOOTLOADER_MINVER 3
+#define MYSBOOTLOADER_MINVER 4
 #define MYSBOOTLOADER_VERSION ((MYSBOOTLOADER_MINVER << 8) + MYSBOOTLOADER_MAJVER)
 
 // The bootloader lives in the top 2 KiB of the ATmega328p flash, the linker places .text at BOOTLOADER_START_ADDRESS.

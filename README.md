@@ -1,4 +1,4 @@
-# MYSBootloader 1.3.0-rc.1
+# MYSBootloader 1.4.0-rc.1
 
 OTA RF24 bootloader for [MySensors](https://www.mysensors.org), based on MySensors library 2.2. It fits in the 2 KiB
 boot section of an ATmega328p, updates the application over the nRF24 radio, and doubles as a serial STK500v1 loader
@@ -105,7 +105,7 @@ avrdude -c usbasp -p m328p -Uflash:w:build/MYSBootloader.ch110.16000000L.RF24_PA
 
 ## Development notes
 
-The image must fit in 2048 bytes and currently uses 1654 to 1730 bytes depending on the configuration (the original code
+The image must fit in 2048 bytes and currently uses 1664 to 1740 bytes depending on the configuration (the original code
 needed 2000 to 2034). Check the `bootloader flash use: N of 2048 bytes` line of `cmake --build` after every change. The
 build also fails if `main` is not the first code in the boot section (the reset vector jumps there), which happens if
 data such as a `PROGMEM` table is placed in front of it.
@@ -147,7 +147,7 @@ older or newer compilers, and keeping the loader state in registers instead of t
 nRF24L01+ and a scripted MySensors controller. It covers a full OTA update (64 blocks, CRC check, start of the new
 application), an up-to-date node, a firmware with a wrong CRC, a firmware config with zero blocks, the bootloader
 commands and a serial STK500 programming session. For the OTA, up-to-date and zero-block scenarios it also compares the
-complete SPI transcript with `tests/sim/golden.txt`, which was recorded from the original, unoptimised bootloader at
+complete SPI transcript with `tests/sim/golden.txt`, which was recorded from the original, unoptimised bootloader (with only its version number raised to 1.4) at
 each clock: every optimisation has to produce byte-identical radio traffic. It needs `simavr`, `libsimavr-dev` and
 `libelf-dev`:
 

@@ -5,7 +5,7 @@
 
 menu.frequency=Frequency
 
-MYSBL.name=ATmega328 with MYSBootloader 1.3.0
+MYSBL.name=ATmega328 with MYSBootloader 1.4.0
 
 MYSBL.upload.tool=avrdude
 MYSBL.upload.protocol=arduino
