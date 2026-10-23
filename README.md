@@ -105,22 +105,51 @@ avrdude -c usbasp -p m328p -Uflash:w:build/MYSBootloader.ch110.16000000L.RF24_PA
 
 ## Development notes
 
-The image must fit in 2048 bytes and currently uses 1838 to 1912 bytes depending on the configuration, so size matters:
-check the `bootloader flash use: N of 2048 bytes` line of `cmake --build` after every change. The build also fails if
-`main` is not the first code in the boot section (the reset vector jumps there), which happens if data such as a
-`PROGMEM` table is placed in front of it.
+The image must fit in 2048 bytes and currently uses 1654 to 1730 bytes depending on the configuration (the original code
+needed 2000 to 2034). Check the `bootloader flash use: N of 2048 bytes` line of `cmake --build` after every change. The
+build also fails if `main` is not the first code in the boot section (the reset vector jumps there), which happens if
+data such as a `PROGMEM` table is placed in front of it.
 
-Size techniques in use: the sources are linked with `-flto`; all variables live in `.noinit` so no `.data`/`.bss`
-startup code is linked in (every variable is written before it is read); EEPROM access, the CRC loop and the buffer
-comparison are small hand-sized routines instead of libc calls; `main` is `OS_main` in `.init9` and the application is
-started with a plain `jmp 0`.
+Sizes are for avr-gcc 7.3, the version Arduino and Debian/Ubuntu ship. CMake warns about newer compilers: they produce
+larger images (14: about 75 bytes more) and avr-gcc 14 cannot link the global register variable below with `-flto`.
+
+### Size techniques
+
+Most of these are specific to the AVR and to this code, so look at the commit history before undoing one:
+
+- **No startup code.** Every variable lives in `.noinit` (or in the one RAM struct), so `__do_clear_bss` and
+  `__do_copy_data` are not linked in. Each variable is written before it is read. A `PROGMEM` table is not an option
+  because the linker puts it in front of `main`.
+- **One RAM struct behind a reserved pointer.** `src/ram.h` keeps the node config, the firmware config, the transmit
+  buffer and a few scalars in a struct that the Y register points to for the whole run (`-ffixed-r28 -ffixed-r29`). The AVR
+  reaches `Y+0..63` with one-word `ldd`/`std`, an absolute address needs the two-word `lds`/`sts`. As a consequence there
+  is no stack frame: nothing may take the address of a local variable.
+- **Assembly where gcc is clearly worse.** The EEPROM routines (`eeprom_put`, `eeprom_put_block`, `eeprom_get_block`) and
+  `flash_page_program`, which shares one command-and-wait tail for erase, write and RWW enable, and the CRC bit loop
+  are written in assembly; gcc needed about twice the bytes.
+- **Never-returning functions.** The serial loader continues into the MySensors loader instead of returning, which
+  removes its register save and restore code.
+- **Cheap constants and types.** `LED_TOGGLE` writes to PINx (one instruction), `jmp 0` starts the application, the
+  length comparison in `process_rx` stays 8 bit, `STK_GET_PARAMETER` is a folded ternary.
+- **Own small routines instead of libc.** Buffer compare, EEPROM access and CRC. `memcpy` is cheaper than a
+  hand-written copy loop because gcc turns such a loop into a `memcpy` call.
+- **Compiler options.** `-flto -Os -mrelax -fno-gcse -fno-move-loop-invariants -fno-tree-fre -fno-reorder-blocks
+  -fno-tree-dominator-opts -fira-algorithm=priority -mstrict-X`. Each was measured on this code and removes between 2
+  and 26 bytes; the generic ones (`-mcall-prologues`, `-fno-split-wide-types`, ...) made it larger or did nothing. Three
+  helpers are marked `NOINLINE` because inlining them into every caller is bigger than a call.
+
+What did not help: `goto` instead of the state `switch`, a table-driven radio init, libc's CRC helper,
+older or newer compilers, and keeping the loader state in registers instead of the RAM struct.
 
 ### Tests
 
 `tests/sim/run.sh <elf> <F_CPU>` runs the bootloader in [simavr](https://github.com/buserror/simavr) against an emulated
 nRF24L01+ and a scripted MySensors controller. It covers a full OTA update (64 blocks, CRC check, start of the new
 application), an up-to-date node, a firmware with a wrong CRC, a firmware config with zero blocks, the bootloader
-commands and a serial STK500 programming session. It needs `simavr`, `libsimavr-dev` and `libelf-dev`:
+commands and a serial STK500 programming session. For the OTA, up-to-date and zero-block scenarios it also compares the
+complete SPI transcript with `tests/sim/golden.txt`, which was recorded from the original, unoptimised bootloader at
+each clock: every optimisation has to produce byte-identical radio traffic. It needs `simavr`, `libsimavr-dev` and
+`libelf-dev`:
 
 ```sh
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/avr-gcc.cmake -DF_CPU=8000000L
@@ -128,4 +157,5 @@ cmake --build build
 tests/sim/run.sh build/MYSBootloader.ch110.8000000L.RF24_PA_MAX.elf 8000000
 ```
 
+The simulated radio uses the default wiring (`SPI_PINS_CE9_CSN10`); the other wirings are only compile-tested.
 CI builds all configurations and runs these tests for every clock.

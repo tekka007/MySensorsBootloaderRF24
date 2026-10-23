@@ -10,12 +10,15 @@
 - Fixed `multicompile.sh` never changing the PA level, so every `compiled/*` MIN/LOW/HIGH image was a MAX image.
   The `compiled/` directory is gone; build the variant you need or let CI build all of them.
 - A firmware config with `blocks == 0` is no longer accepted as an update (it requested block `0xFFFF`).
-- Image size reduced from 2000-2034 to 1838-1912 bytes (the default configurations dropped by about 125 bytes): no
-  `.data`/`.bss` startup code, own EEPROM routines, hand-written CRC loop, no `memcmp`, cheaper LED toggle, a leaner SPI
-  helper, three functions kept out of line and two compiler flags. The build now also verifies that `main` sits at the start of the boot section.
+- Image size reduced from 2000-2034 to 1654-1730 bytes (the default configurations dropped by about 300 bytes, 15%):
+  no `.data`/`.bss` startup code, all RAM in one struct addressed through a reserved Y register, EEPROM routines and the
+  SPM sequence in assembly, a serial loader that continues instead of returning, own small routines instead of libc,
+  and tuned compiler options. The build now also verifies that `main` sits at the start of the boot section. See
+  README for the full list.
 - The CRC stored after a serial (STK500) upload now covers whole firmware blocks, like the CRC checked at every start.
   Before, an upload whose size was not a multiple of 16 bytes stored a CRC the bootloader could never reproduce.
-- Added `tests/sim`, simavr regression tests (OTA update, bad CRC, bootloader commands, serial upload).
+- Added `tests/sim`, simavr regression tests (OTA update, bad CRC, bootloader commands, serial upload) that also compare
+  the radio traffic byte for byte with the original bootloader.
 - CI builds the default images for all supported clocks and wirings and runs the simulator tests.
 
 ## v1.3.0-rc.1

@@ -15,6 +15,14 @@ option(SIZE_CHECK "Fail the build if the image exceeds the boot section" ON)
 option(BOOTLOADER_DEBUG "Show the bootloader state on PORTD" OFF)
 set(BOOTLOADER_SIZE 2048)
 
+# The sizes in the documentation are for avr-gcc 7.3 (the version Arduino and Debian/Ubuntu ship). Other versions were
+# measured too: 5.4 and 4.9 are about 30 bytes larger, 14 about 75 bytes larger, and 14 cannot link the global register
+# variable (see src/ram.h) with -flto at all.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 8)
+  message(WARNING "avr-gcc ${CMAKE_C_COMPILER_VERSION}: this bootloader is tuned for avr-gcc 7.3, newer versions "
+                  "produce larger images and may fail to build")
+endif()
+
 if(NOT BAUD_RATE)
   if(F_CPU MATCHES "^16000000")
     set(BAUD_RATE 115200)
