@@ -2,3 +2,4 @@
 MYSBootloader.d
 MYSBootloader.elf
 MYSBootloader.o
+build/
