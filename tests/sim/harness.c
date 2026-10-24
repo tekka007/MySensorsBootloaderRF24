@@ -45,7 +45,7 @@ static int ce, ce_pending_rx;
 static avr_irq_t *spi_in;
 static uint8_t image[IMG_BLOCKS * 16];
 static uint16_t image_crc;
-static int blocks_requested, tx_count;
+static int blocks_requested, tx_count, wdt_resets;
 
 static uint16_t crc16(const uint8_t *p, int n) {
 	uint16_t c = 0xFFFF;
@@ -266,14 +266,19 @@ int main(int argc, char **argv) {
 		while (avr->cycle < limit && avr->state != cpu_Done && avr->state != cpu_Crashed) {
 			avr_run(avr);
 			if (avr->pc == 0 && avr->cycle > 1000) break;
+			/* the reset vector is the bootloader entry: reaching it again means the watchdog (or a crash) restarted it */
+			if (avr->pc == 0x7800 && avr->cycle > 1000) wdt_resets++;
 		}
 	}
 	int started = (avr->pc == 0 && avr->cycle > 1000);
+	/* WDTCSR when the application starts: shows whether the bootloader left the watchdog running */
+	uint8_t wdtcsr = avr->data[0x60];
 	avr_eeprom_desc_t got = { .ee = NULL, .offset = 0, .size = 1024 };
 	avr_ioctl(avr, AVR_IOCTL_EEPROM_GET, &got);
 	const uint8_t *e = got.ee;
 	printf("scenario=%s started=%d cycles=%llu tx=%d blocks_requested=%d r2=%02x\n", scenario, started,
 	       (unsigned long long)avr->cycle, tx_count, blocks_requested, avr->data[2]);
+	printf("wdt_resets=%d wdtcsr=%02x\n", wdt_resets, wdtcsr);
 	printf("flash_crc_1k=%04x image_crc=%04x\n", crc16(avr->flash, sizeof image), image_crc);
 	printf("eeprom[0..2]=%02x %02x %02x  fwcfg=", e[0], e[1], e[2]);
 	for (int i = 0; i < 8; i++) printf("%02x ", e[EE_FW + i]);

@@ -1,0 +1,30 @@
+name: Release
+
+# Pushing a tag such as v1.4.0 builds the default images and attaches them to a GitHub release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-avr avr-libc binutils-avr cmake
+      - name: Build the default images
+        run: tools/build_release.sh release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MYSBootloader-images
+          path: release/*
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

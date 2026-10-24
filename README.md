@@ -15,8 +15,9 @@ boot section of an ATmega328p, updates the application over the nRF24 radio, and
 | `third_party/` | `boot.h`, the avr-libc SPM helpers with the short-form page operations used here. |
 | `cmake/` | AVR toolchain file and the image size check. |
 | `tools/build_variants.sh` | Builds every clock/channel/PA-level image. |
+| `tools/build_release.sh` | Builds the default images that are attached to a release. |
+| `docs/` | [PROTOCOL.md](docs/PROTOCOL.md), [SIZE.md](docs/SIZE.md), [CONTRIBUTING.md](docs/CONTRIBUTING.md). |
 | `tests/sim/` | Regression tests that run the bootloader in simavr against an emulated nRF24 and controller. |
-| `hex/` | Ready-made default images, see below. |
 | `arduino/boards.txt` | Board definition for the Arduino IDE. |
 
 ## Building
@@ -41,6 +42,7 @@ The build fails if the image is larger than the 2048 byte boot section, and prin
 | `WATCHDOG_ON_SKETCH_START` | `ON` | Leave the watchdog running (8 s) when the application starts |
 | `BOOTLOADER_COMMANDS` | `ON` | Clear EEPROM / set node id / set parent id commands from the controller |
 | `BOOTLOADER_DEBUG` | `OFF` | Show the bootloader state as a bit pattern on PORTD |
+| `LTO` | `ON` | Link-time optimisation, worth about 120 bytes. Must be `OFF` with avr-gcc 14 |
 | `SIZE_CHECK` | `ON` | Fail the build when the image does not fit |
 
 Less common settings (LED pin, watchdog timeout, radio address) are defaults in `src/config.h` and can be overridden
@@ -54,9 +56,10 @@ CLOCKS="8000000L" CHANNELS="76 100" tools/build_variants.sh out
 
 ### Ready-made images
 
-`hex/` holds the default images for the common boards (16 MHz, 8 MHz, 1 MHz and NRFduino 8 MHz, channel 110). They
-were built before the source reorganisation. Anything else, in particular another channel or PA level, has to be built
-from source.
+The default images for the common boards (16 MHz, 8 MHz, 1 MHz and NRFduino 8 MHz, channel 110, maximum PA level) are
+attached to every [release](https://github.com/tekka007/MySensorsBootloaderRF24/releases), together with a `SHA256SUMS`
+file. They are built by CI from the tagged sources (`tools/build_release.sh`); the file names match `arduino/boards.txt`.
+Anything else, in particular another channel or PA level, has to be built from source.
 
 ## Supported nRF24 wiring configurations
 
@@ -106,49 +109,35 @@ avrdude -c usbasp -p m328p -Uflash:w:build/MYSBootloader.ch110.16000000L.RF24_PA
 ## Development notes
 
 The image must fit in 2048 bytes and currently uses 1664 to 1740 bytes depending on the configuration (the original code
-needed 2000 to 2034). Check the `bootloader flash use: N of 2048 bytes` line of `cmake --build` after every change. The
-build also fails if `main` is not the first code in the boot section (the reset vector jumps there), which happens if
-data such as a `PROGMEM` table is placed in front of it.
+needed 2000 to 2034). Check the `bootloader flash use: N of 2048 bytes` line of `cmake --build` after every change.
 
-Sizes are for avr-gcc 7.3, the version Arduino and Debian/Ubuntu ship. CMake warns about newer compilers: they produce
-larger images (14: about 75 bytes more) and avr-gcc 14 cannot link the global register variable below with `-flto`.
+The size comes from a handful of AVR-specific techniques: no startup code (all variables in `.noinit`), all state in one
+struct addressed through the reserved Y register, hand-written assembly for EEPROM and flash routines, functions that never
+return, and measured compiler options. Details, the toolchain comparison and the list of experiments that did not help
+are in [docs/SIZE.md](docs/SIZE.md). Rules for changing the code: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
-### Size techniques
+Sizes are for avr-gcc 7.3. Newer compilers produce larger images (14: about 230 bytes more, and it needs `-DLTO=OFF`,
+which still fits and passes the simulator tests); CMake warns about them.
 
-Most of these are specific to the AVR and to this code, so look at the commit history before undoing one:
+### Watchdog
 
-- **No startup code.** Every variable lives in `.noinit` (or in the one RAM struct), so `__do_clear_bss` and
-  `__do_copy_data` are not linked in. Each variable is written before it is read. A `PROGMEM` table is not an option
-  because the linker puts it in front of `main`.
-- **One RAM struct behind a reserved pointer.** `src/ram.h` keeps the node config, the firmware config, the transmit
-  buffer and a few scalars in a struct that the Y register points to for the whole run (`-ffixed-r28 -ffixed-r29`). The AVR
-  reaches `Y+0..63` with one-word `ldd`/`std`, an absolute address needs the two-word `lds`/`sts`. As a consequence there
-  is no stack frame: nothing may take the address of a local variable.
-- **Assembly where gcc is clearly worse.** The EEPROM routines (`eeprom_put`, `eeprom_put_block`, `eeprom_get_block`) and
-  `flash_page_program`, which shares one command-and-wait tail for erase, write and RWW enable, and the CRC bit loop
-  are written in assembly; gcc needed about twice the bytes.
-- **Never-returning functions.** The serial loader continues into the MySensors loader instead of returning, which
-  removes its register save and restore code.
-- **Cheap constants and types.** `LED_TOGGLE` writes to PINx (one instruction), `jmp 0` starts the application, the
-  length comparison in `process_rx` stays 8 bit, `STK_GET_PARAMETER` is a folded ternary.
-- **Own small routines instead of libc.** Buffer compare, EEPROM access and CRC. `memcpy` is cheaper than a
-  hand-written copy loop because gcc turns such a loop into a `memcpy` call.
-- **Compiler options.** `-flto -Os -mrelax -fno-gcse -fno-move-loop-invariants -fno-tree-fre -fno-reorder-blocks
-  -fno-tree-dominator-opts -fira-algorithm=priority -mstrict-X`. Each was measured on this code and removes between 2
-  and 26 bytes; the generic ones (`-mcall-prologues`, `-fno-split-wide-types`, ...) made it larger or did nothing. Three
-  helpers are marked `NOINLINE` because inlining them into every caller is bigger than a call.
-
-What did not help: `goto` instead of the state `switch`, a table-driven radio init, libc's CRC helper,
-older or newer compilers, and keeping the loader state in registers instead of the RAM struct.
+The bootloader starts the watchdog with an 8 s timeout and kicks it in every wait loop of the radio and serial
+protocols, so a stuck update restarts the node. When the application starts the watchdog is **left running** (8 s, the
+default `WATCHDOG_ON_SKETCH_START=ON`): the application must call `wdt_reset()` or disable it within 8 s, and can read the
+MCUSR reset flags the bootloader hands over in `r2` (retrieve them in a `.init0` function). With `-DWATCHDOG_ON_SKETCH_START=OFF` it is disabled before the jump.
+The simulator checks this: a complete OTA update of about 90 simulated seconds runs without a single watchdog reset, and the
+register reads `0x29` (WDE, 8 s) when the application starts. The check can fail: a build whose `wdt_kick` does nothing is reset
+thousands of times in the same run.
 
 ### Tests
 
 `tests/sim/run.sh <elf> <F_CPU>` runs the bootloader in [simavr](https://github.com/buserror/simavr) against an emulated
 nRF24L01+ and a scripted MySensors controller. It covers a full OTA update (64 blocks, CRC check, start of the new
-application), an up-to-date node, a firmware with a wrong CRC, a firmware config with zero blocks, the bootloader
+application, watchdog behaviour), an up-to-date node, a firmware with a wrong CRC, a firmware config with zero blocks, the bootloader
 commands and a serial STK500 programming session. For the OTA, up-to-date and zero-block scenarios it also compares the
-complete SPI transcript with `tests/sim/golden.txt`, which was recorded from the original, unoptimised bootloader (with only its version number raised to 1.4) at
-each clock: every optimisation has to produce byte-identical radio traffic. It needs `simavr`, `libsimavr-dev` and
+complete SPI transcript with `tests/sim/golden.txt`, which was recorded from the original, unoptimised bootloader at
+each clock: every optimisation has to produce byte-identical radio traffic. How the file was made and how to reproduce it:
+[tests/sim/golden.README.md](tests/sim/golden.README.md). It needs `simavr`, `libsimavr-dev` and
 `libelf-dev`:
 
 ```sh

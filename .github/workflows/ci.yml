@@ -65,3 +65,36 @@ jobs:
           cmake --build build
       - name: Run bootloader in simavr
         run: tests/sim/run.sh build/MYSBootloader.*.elf ${{ matrix.f_cpu }}
+
+  # Not a gate: measures the newest avr-gcc (Debian trixie ships 14) against the sizes of the tuned avr-gcc 7.3 images
+  # and runs the simulator on them, so a toolchain migration can be decided on data. avr-gcc 14 cannot link the register
+  # variable with LTO, hence -DLTO=OFF.
+  newer-toolchain:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container: debian:trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {f_cpu: 16000000, reference: 1728}
+          - {f_cpu: 8000000, reference: 1732}
+          - {f_cpu: 1000000, reference: 1716}
+    steps:
+      - name: Install toolchain and simulator
+        run: apt-get update && apt-get install -y git gcc gcc-avr avr-libc binutils-avr cmake make libsimavr-dev libelf-dev
+      - uses: actions/checkout@v4
+      - name: Build without LTO
+        run: |
+          cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/avr-gcc.cmake -DF_CPU=${{ matrix.f_cpu }}L -DLTO=OFF -DSIZE_CHECK=OFF
+          cmake --build build | tee build.log
+          size=$(sed -n 's/.*flash use: \([0-9]*\) of.*/\1/p' build.log)
+          {
+            echo "### $(avr-gcc --version | head -1), F_CPU=${{ matrix.f_cpu }}"
+            echo "| avr-gcc 7.3 reference | this compiler | delta |"
+            echo "|-----------------------|---------------|-------|"
+            echo "| ${{ matrix.reference }} B | ${size} B | $((size - ${{ matrix.reference }})) B |"
+            [ "$size" -le 2048 ] && echo "Fits in the boot section." || echo "**Does not fit in 2048 bytes.**"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Run bootloader in simavr
+        run: tests/sim/run.sh build/MYSBootloader.*.elf ${{ matrix.f_cpu }}
