@@ -3,6 +3,7 @@
 #include "bootloader.h"
 #include "board.h"
 #include "hw.h"
+#include "ram.h"
 #include "rf24.h"
 #include "rf24_registers.h"
 
@@ -11,7 +12,6 @@
 
 // Pipe address: byte 0 is the node id, the remaining bytes are the constant network prefix set in rf24_init().
 // (A PROGMEM table would be placed before main at the reset vector, so the prefix is stored with immediate values.)
-static uint8_t base_addr[RF24_ADDR_WIDTH] NOINIT;
 
 // Sends cmd followed by len bytes. In read mode the bytes are clocked in (sending NOP) and stored in buf, otherwise they
 // are taken from buf. Returns the last byte received, i.e. the status for a command and the data for a one byte read.
@@ -29,13 +29,13 @@ static uint8_t spi_bytes(const uint8_t cmd, uint8_t *buf, uint8_t len, const boo
 	return status;
 }
 
-static uint8_t write_byte(const uint8_t cmd, uint8_t value) {
-	return spi_bytes(cmd, &value, 1, false);
+static uint8_t write_byte(const uint8_t cmd, const uint8_t value) {
+	R->scratch = value;
+	return spi_bytes(cmd, &R->scratch, 1, false);
 }
 
-static uint8_t read_byte(const uint8_t cmd) {
-	uint8_t value;
-	return spi_bytes(cmd, &value, 1, true);
+NOINLINE static uint8_t read_byte(const uint8_t cmd) {
+	return spi_bytes(cmd, &R->scratch, 1, true);
 }
 
 static inline void write_register(const uint8_t reg, const uint8_t value) {
@@ -70,8 +70,8 @@ static bool write_payload(uint8_t *buf, const uint8_t len) {
 	return status & _BV(TX_DS);
 }
 
-static void set_pipe_address(const uint8_t pipe) {
-	(void)spi_bytes(pipe | W_REGISTER, base_addr, RF24_ADDR_WIDTH, false);
+NOINLINE static void set_pipe_address(const uint8_t pipe) {
+	(void)spi_bytes(pipe | W_REGISTER, R->base_addr, RF24_ADDR_WIDTH, false);
 }
 
 bool rf24_data_available(void) {
@@ -97,7 +97,7 @@ bool rf24_write_message(const uint8_t recipient, const uint8_t own_id, uint8_t *
 	CE_LOW();
 	write_register(CONFIG, RF24_CONFIG | _BV(PWR_UP));
 	// pipe 0 RX/TX address is the recipient
-	base_addr[0] = recipient;
+	R->base_addr[0] = recipient;
 	set_pipe_address(RX_ADDR_P0);
 	set_pipe_address(TX_ADDR);
 	const bool result = write_payload(buf, len);
@@ -111,7 +111,7 @@ bool rf24_write_message(const uint8_t recipient, const uint8_t own_id, uint8_t *
 bool rf24_init(void) {
 	{
 		static const uint8_t tail[] = { RF24_BASE_RADIO_ID_TAIL };
-		for (uint8_t i = 0; i < sizeof(tail); i++) base_addr[i + 1] = tail[i];
+		for (uint8_t i = 0; i < sizeof(tail); i++) R->base_addr[i + 1] = tail[i];
 	}
 	CE_LOW();
 	CSN_HIGH();

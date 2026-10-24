@@ -12,7 +12,7 @@
 
 // version
 #define MYSBOOTLOADER_MAJVER 1
-#define MYSBOOTLOADER_MINVER 3
+#define MYSBOOTLOADER_MINVER 4
 #define MYSBOOTLOADER_VERSION ((MYSBOOTLOADER_MINVER << 8) + MYSBOOTLOADER_MAJVER)
 
 // The bootloader lives in the top 2 KiB of the ATmega328p flash, the linker places .text at BOOTLOADER_START_ADDRESS.
@@ -22,6 +22,10 @@
 // Variables in .noinit are neither zeroed nor initialised, which removes the startup code (__do_clear_bss and
 // __do_copy_data). Every variable placed there is written before it is read.
 #define NOINIT __attribute__((section(".noinit")))
+
+// Functions marked NOINLINE are used from several places; with -Os the compiler would still inline them, which is
+// bigger than a call. Found by trying noinline/always_inline on every function and keeping what shrinks the image.
+#define NOINLINE __attribute__((noinline))
 
 #define FIRMWARE_BLOCK_SIZE			(16)
 #define EEPROM_SIZE					(1024)		// ATmega328p

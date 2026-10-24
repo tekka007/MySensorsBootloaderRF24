@@ -7,6 +7,7 @@
 #include "mys_eeprom.h"
 #include "mys_loader.h"
 #include "mys_message.h"
+#include "ram.h"
 #include "rf24.h"
 
 #define TIMEOUT_MS						(2000)		// careful when changing
@@ -43,15 +44,11 @@ typedef enum {
 	BL_RUN
 } bl_state_t;
 
-uint8_t mys_reset_flags NOINIT;
 
-static MyMessage out_msg NOINIT;
-static MyMessage in_msg NOINIT;
-static nodeConfig_t node_config NOINIT;
-static uint8_t configured_parent_id NOINIT;
+MyMessage in_msg NOINIT;
 
-void mys_save_firmware_config(const uint8_t *config) {
-	eeprom_put_block(EEPROM_FIRMWARE_TYPE_ADDRESS, config, sizeof(nodeFirmwareConfig_t));
+void mys_save_firmware_config(void) {
+	eeprom_put_block(EEPROM_FIRMWARE_TYPE_ADDRESS, (const uint8_t *)&R->fw_config, sizeof(nodeFirmwareConfig_t));
 }
 
 // message building ------------------------------------------------------------------------------------------------------
@@ -62,48 +59,48 @@ void mys_save_firmware_config(const uint8_t *config) {
 // Fills the common header fields. Kept as a plain function with constant arguments (see build_message): inlining it
 // at every call site costs more flash than the call.
 static void build_message_proto(const uint8_t type, const uint8_t version_length, const uint8_t command_ack_payload) {
-	out_msg.sender = node_config.nodeId;
-	out_msg.last = node_config.nodeId;
-	out_msg.sensor = NODE_SENSOR_ID;
-	out_msg.type = type;
-	out_msg.command_ack_payload = command_ack_payload;
-	out_msg.version_length = version_length;
+	R->out_msg.sender = R->node_config.nodeId;
+	R->out_msg.last = R->node_config.nodeId;
+	R->out_msg.sensor = NODE_SENSOR_ID;
+	R->out_msg.type = type;
+	R->out_msg.command_ack_payload = command_ack_payload;
+	R->out_msg.version_length = version_length;
 }
 
 #define build_message(command, type, payload_type, length) \
 	build_message_proto((type), (((length) << 3) | (MSG_SIGN << 2) | (PROTOCOL_VERSION & 3)), \
 	                    (((payload_type) << 5) | (REQ_ACK << 3) | ((command) & 7)))
 
-#define set_destination(dest)	(out_msg.destination = (dest))
+#define set_destination(dest)	(R->out_msg.destination = (dest))
 
 static inline bool send_message(void) {
-	return rf24_write_message(node_config.parentNodeId, node_config.nodeId, out_msg.array, HEADER_SIZE + mGetLength(out_msg));
+	return rf24_write_message(R->node_config.parentNodeId, R->node_config.nodeId, R->out_msg.array, HEADER_SIZE + mGetLength(R->out_msg));
 }
 
 // Reads one message, returns its type if it is addressed to us (or I_NO_ANSWER_PSEUDO_COMMAND).
-// I_FIND_PARENT_RESPONSE messages update the parent/distance in node_config as a side effect.
+// I_FIND_PARENT_RESPONSE messages update the parent/distance in R->node_config as a side effect.
 static uint8_t process_rx(void) {
 	uint8_t result = I_NO_ANSWER_PSEUDO_COMMAND;
 	if (rf24_data_available()) {
 		// discard faulty transmissions
-		if (rf24_read_message(in_msg.array) != mGetLength(in_msg) + HEADER_SIZE) {
+		if (rf24_read_message(in_msg.array) != (uint8_t)(mGetLength(in_msg) + HEADER_SIZE)) {
 			return result;
 		}
-		if (in_msg.destination == node_config.nodeId) {
+		if (in_msg.destination == R->node_config.nodeId) {
 			result = in_msg.type;
 			// parse internal find parent response only if configured parent not already found or not defined
 			if ((mGetCommand(in_msg) == C_INTERNAL) && (in_msg.type == I_FIND_PARENT_RESPONSE) &&
-			    ((node_config.parentNodeId != configured_parent_id) || (configured_parent_id == AUTO))) {
-				if (in_msg.sender == configured_parent_id) {
+			    ((R->node_config.parentNodeId != R->configured_parent_id) || (R->configured_parent_id == AUTO))) {
+				if (in_msg.sender == R->configured_parent_id) {
 					// configured parent found, save it
-					node_config.parentNodeId = configured_parent_id;
+					R->node_config.parentNodeId = R->configured_parent_id;
 					// stop the find parent waiting loop by answering using the pseudo command
 					result = I_FIND_CONFIGURED_PARENT_RESPONSE_PSEUDO_COMMAND;
 				}
 				// payload value is sender distance to gateway, increase it to get our distance
-				else if (in_msg.payload.bValue++ < node_config.distance) {
-					node_config.distance = in_msg.payload.bValue;
-					node_config.parentNodeId = in_msg.sender;
+				else if (in_msg.payload.bValue++ < R->node_config.distance) {
+					R->node_config.distance = in_msg.payload.bValue;
+					R->node_config.parentNodeId = in_msg.sender;
 				}
 			}
 		}
@@ -111,7 +108,7 @@ static uint8_t process_rx(void) {
 	return result;
 }
 
-// Send out_msg and process incoming messages until response_type arrives. Times out after TIMEOUT_MS per attempt and
+// Send R->out_msg and process incoming messages until response_type arrives. Times out after TIMEOUT_MS per attempt and
 // retries up to `retries` more times.
 #if F_CPU == 1000000L
 	#define COUNTER_START_VAL	(0xFFFE / 4)	// empirical value
@@ -162,15 +159,15 @@ static uint8_t byte_atoi(const char *str, uint8_t len) {
 
 // state machine ---------------------------------------------------------------------------------------------------------
 
-void mys_loader_run(void) {
-	nodeFirmwareConfig_t fw_config;
-	uint16_t requested_block = 0u;
-	uint16_t new_firmware_crc = 0xFFFF;
-	// typed views on the message payloads
-	requestFirmwareConfig_t *config_request = (requestFirmwareConfig_t *)out_msg.payload.data;
-	nodeFirmwareConfig_t *config_response = (nodeFirmwareConfig_t *)in_msg.payload.data;
-	requestFirmwareBlock_t *block_request = (requestFirmwareBlock_t *)out_msg.payload.data;
-	responseFirmwareBlock_t *block_response = (responseFirmwareBlock_t *)in_msg.payload.data;
+// typed views on the message payloads
+#define config_request	((requestFirmwareConfig_t *)R->out_msg.payload.data)
+#define config_response	((nodeFirmwareConfig_t *)in_msg.payload.data)
+#define block_request	((requestFirmwareBlock_t *)R->out_msg.payload.data)
+#define block_response	((responseFirmwareBlock_t *)in_msg.payload.data)
+#define requested_block		(R->requested_block)
+#define new_firmware_crc	(R->new_firmware_crc)
+
+NOINLINE void mys_loader_run(void) {
 	bl_state_t state = BL_READ_CONFIG;
 
 	spi_init();
@@ -180,9 +177,9 @@ void mys_loader_run(void) {
 		case BL_READ_CONFIG:
 			DEBUG_STATE(DEBUG_READ_CONFIG);
 			// node id, parent node id, distance
-			eeprom_get_block(EEPROM_NODE_ID_ADDRESS, &node_config, sizeof(nodeConfig_t));
+			eeprom_get_block(EEPROM_NODE_ID_ADDRESS, &R->node_config, sizeof(nodeConfig_t));
 			// firmware type, version, CRC, blocks
-			eeprom_get_block(EEPROM_FIRMWARE_TYPE_ADDRESS, &fw_config, sizeof(nodeFirmwareConfig_t));
+			eeprom_get_block(EEPROM_FIRMWARE_TYPE_ADDRESS, &R->fw_config, sizeof(nodeFirmwareConfig_t));
 			// without a working radio proceed to the startup check
 			state = rf24_init() ? BL_FIND_PARENTS : BL_RUN;
 			break;
@@ -190,9 +187,9 @@ void mys_loader_run(void) {
 		case BL_FIND_PARENTS:
 			DEBUG_STATE(DEBUG_FIND_PARENTS);
 			// use the static parent if it answers, otherwise the closest node to the gateway
-			configured_parent_id = node_config.parentNodeId;
-			node_config.parentNodeId = AUTO;
-			node_config.distance = DISTANCE_INVALID;
+			R->configured_parent_id = R->node_config.parentNodeId;
+			R->node_config.parentNodeId = AUTO;
+			R->node_config.distance = DISTANCE_INVALID;
 			set_destination(BROADCAST_ADDRESS);
 			// ChinRF24 clones have an inverted NO_ACK bit: do not use the NO_ACK feature, but limit the retries to 3
 			rf24_set_retries(5, 3);
@@ -204,12 +201,12 @@ void mys_loader_run(void) {
 			set_destination(GATEWAY_ADDRESS);
 			rf24_set_retries(RF24_ARD, RF24_ARC);
 			// no reply (e.g. no parent nodes): proceed to startup
-			state = (node_config.parentNodeId != AUTO) ? BL_CHECK_ID : BL_RUN;
+			state = (R->node_config.parentNodeId != AUTO) ? BL_CHECK_ID : BL_RUN;
 			break;
 
 		case BL_CHECK_ID:
 			DEBUG_STATE(DEBUG_CHECK_ID);
-			if (node_config.nodeId == GATEWAY_ADDRESS || node_config.nodeId == AUTO) {
+			if (R->node_config.nodeId == GATEWAY_ADDRESS || R->node_config.nodeId == AUTO) {
 				build_message(C_INTERNAL, I_ID_REQUEST, P_BYTE, 0);
 				if (send_process_type(I_ID_RESPONSE, 3)) {
 					#ifdef DEBUG
@@ -231,18 +228,18 @@ void mys_loader_run(void) {
 			// default: if no reply received, proceed to startup
 			state = BL_RUN;
 			// signing preferences: tell the gateway the bootloader does not require signed messages
-			out_msg.payload.data[0] = SIGNING_PRESENTATION_VERSION_1;
-			out_msg.payload.data[1] = SIGNING_PRESENTATION_VALUE;
+			R->out_msg.payload.data[0] = SIGNING_PRESENTATION_VERSION_1;
+			R->out_msg.payload.data[1] = SIGNING_PRESENTATION_VALUE;
 			build_message(C_INTERNAL, I_SIGNING_PRESENTATION, P_CUSTOM, 2);
 			(void)send_process_type(I_SIGNING_PRESENTATION, 0);
 			// refresh the CRC in case of memory corruption or a failed transmission
-			fw_config.crc = flash_crc(fw_config.blocks);
-			(void)memcpy(config_request, &fw_config, sizeof(nodeFirmwareConfig_t));
+			R->fw_config.crc = flash_crc(R->fw_config.blocks);
+			(void)memcpy(config_request, &R->fw_config, sizeof(nodeFirmwareConfig_t));
 			config_request->BLVersion = MYSBOOTLOADER_VERSION;
 			build_message(C_STREAM, ST_FIRMWARE_CONFIG_REQUEST, P_CUSTOM, sizeof(requestFirmwareConfig_t));
 			if (send_process_type(ST_FIRMWARE_CONFIG_RESPONSE, 3)) {
 				DEBUG_STATE(DEBUG_CONFIG_RECEIVED);
-				if (differ((const uint8_t *)&fw_config, (const uint8_t *)in_msg.payload.data, sizeof(nodeFirmwareConfig_t))) {
+				if (differ((const uint8_t *)&R->fw_config, (const uint8_t *)in_msg.payload.data, sizeof(nodeFirmwareConfig_t))) {
 					#ifdef BOOTLOADER_COMMANDS
 					if (!config_response->blocks && config_response->crc == BL_CMD_MAGIC) {
 						const uint16_t command = config_response->type_command.bl_command;
@@ -264,7 +261,7 @@ void mys_loader_run(void) {
 						// request block 0xFFFF and wrap the flash address.
 						if (config_response->blocks &&
 						    config_response->blocks < (BOOTLOADER_START_ADDRESS / FIRMWARE_BLOCK_SIZE)) {
-							(void)memcpy(&fw_config, in_msg.payload.data, sizeof(nodeFirmwareConfig_t));
+							(void)memcpy(&R->fw_config, in_msg.payload.data, sizeof(nodeFirmwareConfig_t));
 							state = BL_INIT_UPDATE;
 						}
 					}
@@ -275,17 +272,17 @@ void mys_loader_run(void) {
 		case BL_INIT_UPDATE:
 			DEBUG_STATE(DEBUG_INIT_UPDATE);
 			state = BL_DO_UPDATE;
-			new_firmware_crc = fw_config.crc;
+			new_firmware_crc = R->fw_config.crc;
 			// invalidate the CRC and save the new details, so an interrupted transfer is detected on restart
-			fw_config.crc = 0xFFFF;
-			mys_save_firmware_config((const uint8_t *)&fw_config);
-			requested_block = fw_config.blocks;
+			R->fw_config.crc = 0xFFFF;
+			mys_save_firmware_config();
+			requested_block = R->fw_config.blocks;
 			break;
 
 		case BL_DO_UPDATE:
 			DEBUG_STATE(DEBUG_DO_UPDATE);
-			block_request->type = fw_config.type_command.type;
-			block_request->version = fw_config.version_data.version;
+			block_request->type = R->fw_config.type_command.type;
+			block_request->version = R->fw_config.version_data.version;
 			block_request->block = requested_block - 1;
 			build_message(C_STREAM, ST_FIRMWARE_REQUEST, P_CUSTOM, sizeof(requestFirmwareBlock_t));
 			// the firmware is loaded counting backwards
@@ -302,13 +299,13 @@ void mys_loader_run(void) {
 					requested_block--;
 					if (!requested_block) {
 						// last block received: validate the firmware CRC
-						fw_config.crc = new_firmware_crc;
-						if (flash_crc(fw_config.blocks) != new_firmware_crc) {
+						R->fw_config.crc = new_firmware_crc;
+						if (flash_crc(R->fw_config.blocks) != new_firmware_crc) {
 							// invalid firmware: 0 blocks, whose CRC evaluates to 0xFFFF
-							fw_config.blocks = 0u;
-							fw_config.crc = 0u;
+							R->fw_config.blocks = 0u;
+							R->fw_config.crc = 0u;
 						}
-						mys_save_firmware_config((const uint8_t *)&fw_config);
+						mys_save_firmware_config();
 						state = BL_READ_CONFIG;
 					}
 				}
@@ -320,7 +317,7 @@ void mys_loader_run(void) {
 		case BL_RUN:
 			DEBUG_STATE(DEBUG_PREPARE_RUN);
 			// verify the flash CRC against the one stored in EEPROM
-			if (flash_crc(fw_config.blocks) == fw_config.crc) {
+			if (flash_crc(R->fw_config.blocks) == R->fw_config.crc) {
 				DEBUG_STATE(DEBUG_RUN);
 				spi_close();
 				#ifdef WATCHDOG_ON_SKETCH_START
@@ -329,7 +326,7 @@ void mys_loader_run(void) {
 					wdt_configure(WATCHDOG_OFF);
 				#endif
 				// hand the reset flags to the application in r2 (retrieved there using .init0)
-				__asm__ __volatile__ ("mov r2, %0\n" :: "r" (mys_reset_flags));
+				__asm__ __volatile__ ("mov r2, %0\n" :: "r" (R->reset_flags));
 				// run the application
 				__asm__ __volatile__ ("jmp 0\n");
 			}

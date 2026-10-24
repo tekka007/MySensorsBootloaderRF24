@@ -5,7 +5,7 @@
 
 // Watchdog ------------------------------------------------------------------------------------------------------------
 
-void wdt_configure(const uint8_t config) {
+NOINLINE void wdt_configure(const uint8_t config) {
 	WDTCSR = _BV(WDCE) | _BV(WDE);
 	WDTCSR = config;
 }
@@ -105,12 +105,25 @@ uint8_t uart_getc(void) {
 
 // Flash ---------------------------------------------------------------------------------------------------------------
 
-void flash_page_program(const uint16_t page) {
-	__boot_page_erase_short(page);
-	boot_spm_busy_wait();
-	__boot_page_write_short(page);
-	boot_spm_busy_wait();
-	__boot_rww_enable_short();
+// Erases and writes the flash page whose address is in r25:r24 (the page buffer was filled with flash_buffer_fill()),
+// then re-enables the RWW section. Written in assembly so the three SPM operations share one command-and-wait tail.
+__attribute__((naked)) void flash_page_program(uint16_t page) {
+	__asm__ __volatile__ (
+		"movw r30, r24\n"
+		"ldi r24, %[erase]\n"
+		"rcall 1f\n"
+		"ldi r24, %[write]\n"
+		"rcall 1f\n"
+		"ldi r24, %[rww]\n"
+		"1: out %[spmcsr], r24\n"		/* the SPM must follow within 4 cycles */
+		"spm\n"
+		"2: in r0, %[spmcsr]\n"			/* wait until the operation is done */
+		"sbrc r0, %[spmen]\n"
+		"rjmp 2b\n"
+		"ret\n"
+		:: [spmcsr] "I" (_SFR_IO_ADDR(SPMCSR)), [spmen] "I" (SPMEN),
+		   [erase] "M" (_BV(SPMEN) | _BV(PGERS)), [write] "M" (_BV(SPMEN) | _BV(PGWRT)),
+		   [rww] "M" (_BV(SPMEN) | _BV(RWWSRE)));
 }
 
 static uint16_t crc16_update(uint16_t crc, const uint8_t data) {
@@ -146,34 +159,64 @@ uint16_t flash_crc(const uint16_t blocks) {
 }
 
 // EEPROM --------------------------------------------------------------------------------------------------------------
+//
+// Written in assembly: gcc turns these loops into about twice as many bytes. They are naked functions that follow the
+// avr-gcc calling convention (arguments in r25:r24, r23:r22, r20; they only touch r0, r18 and X, never r1 or Y).
+// Interrupts are never enabled in the bootloader, so the 4 cycle EEMPE/EEPE sequence needs no cli.
+// EEPM = 00 (the reset value): a write erases and programs in one operation.
 
-static uint8_t eeprom_get(const uint16_t address) {
-	while (EECR & _BV(EEPE));
-	EEAR = address;
-	EECR = _BV(EERE);
-	return EEDR;
+#define EE_WAIT_AND_SELECT \
+	"1: sbic %[eecr], %[eepe]\n"		/* wait for a running write to finish */ \
+	"rjmp 1b\n" \
+	"out %[earh], r25\n" \
+	"out %[earl], r24\n"
+
+#define EE_OPERANDS \
+	[eecr] "I" (_SFR_IO_ADDR(EECR)), [eedr] "I" (_SFR_IO_ADDR(EEDR)), \
+	[earh] "I" (_SFR_IO_ADDR(EEARH)), [earl] "I" (_SFR_IO_ADDR(EEARL)), \
+	[eere] "I" (EERE), [eepe] "I" (EEPE), [eempe] "I" (EEMPE)
+
+// void eeprom_put(uint16_t address /* r25:r24 */, uint8_t value /* r22 */): only writes when the value differs
+__attribute__((naked)) void eeprom_put(uint16_t address, uint8_t value) {
+	__asm__ __volatile__ (
+		EE_WAIT_AND_SELECT
+		"sbi %[eecr], %[eere]\n"
+		"in r0, %[eedr]\n"
+		"cp r0, r22\n"
+		"breq 2f\n"
+		"out %[eedr], r22\n"
+		"sbi %[eecr], %[eempe]\n"
+		"sbi %[eecr], %[eepe]\n"
+		"2: ret\n"
+		:: EE_OPERANDS);
 }
 
-void eeprom_put(const uint16_t address, const uint8_t value) {
-	if (eeprom_get(address) != value) {
-		// EEPM = 00: erase and write in one operation. EEPE has to be set within 4 cycles of EEMPE.
-		EEDR = value;
-		EECR = _BV(EEMPE);
-		EECR = _BV(EEPE);
-	}
+// void eeprom_put_block(uint16_t address /* r25:r24 */, const uint8_t *buf /* r23:r22 */, uint8_t len /* r20, > 0 */)
+__attribute__((naked)) void eeprom_put_block(uint16_t address, const uint8_t *buf, uint8_t len) {
+	__asm__ __volatile__ (
+		"movw r26, r22\n"
+		"1: ld r22, X+\n"
+		"rcall eeprom_put\n"
+		"adiw r24, 1\n"
+		"dec r20\n"
+		"brne 1b\n"
+		"ret\n"
+		::);
 }
 
-void eeprom_put_block(uint16_t address, const uint8_t *buf, uint8_t len) {
-	while (len--) {
-		eeprom_put(address++, *buf++);
-	}
-}
-
-void eeprom_get_block(uint16_t address, void *buf, uint8_t len) {
-	uint8_t *dst = buf;
-	while (len--) {
-		*dst++ = eeprom_get(address++);
-	}
+// void eeprom_get_block(uint16_t address /* r25:r24 */, void *buf /* r23:r22 */, uint8_t len /* r20, > 0 */)
+__attribute__((naked)) void eeprom_get_block(uint16_t address, void *buf, uint8_t len) {
+	__asm__ __volatile__ (
+		"movw r26, r22\n"
+		EE_WAIT_AND_SELECT
+		"sbi %[eecr], %[eere]\n"
+		"in r18, %[eedr]\n"
+		"st X+, r18\n"
+		"adiw r24, 1\n"
+		"dec r20\n"
+		"brne 1b\n"
+		"ret\n"
+		:: EE_OPERANDS);
 }
 
 // LED -----------------------------------------------------------------------------------------------------------------

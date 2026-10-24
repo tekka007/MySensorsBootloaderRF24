@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## v1.4.0-rc.1
 
+- Version 1.4: the bootloader version reported to the controller in the firmware config request (`BLVersion`) is now
+  `0x0104`.
 - Sources moved to `src/` and split into `.c`/`.h` units (`hw`, `rf24`, `stk500_loader`, `mys_loader`); unused MySensors
   sensor/data enums and the shadowed `string.h` removed, state names and globals cleaned up.
 - Build moved from the hand-edited `Makefile` to CMake. All settings (clock, baud rate, channel, PA level, data rate,
@@ -10,12 +12,15 @@
 - Fixed `multicompile.sh` never changing the PA level, so every `compiled/*` MIN/LOW/HIGH image was a MAX image.
   The `compiled/` directory is gone; build the variant you need or let CI build all of them.
 - A firmware config with `blocks == 0` is no longer accepted as an update (it requested block `0xFFFF`).
-- Image size reduced from 2000-2034 to 1872-1940 bytes (the default configurations dropped by about 95 bytes): no
-  `.data`/`.bss` startup code, own EEPROM routines, hand-written CRC loop, no `memcmp`, cheaper LED toggle, a leaner SPI
-  helper and two compiler flags. The build now also verifies that `main` sits at the start of the boot section.
+- Image size reduced from 2000-2034 to 1664-1740 bytes (the default configurations dropped by about 300 bytes, 15%):
+  no `.data`/`.bss` startup code, all RAM in one struct addressed through a reserved Y register, EEPROM routines and the
+  SPM sequence in assembly, a serial loader that continues instead of returning, own small routines instead of libc,
+  and tuned compiler options. The build now also verifies that `main` sits at the start of the boot section. See
+  README for the full list.
 - The CRC stored after a serial (STK500) upload now covers whole firmware blocks, like the CRC checked at every start.
   Before, an upload whose size was not a multiple of 16 bytes stored a CRC the bootloader could never reproduce.
-- Added `tests/sim`, simavr regression tests (OTA update, bad CRC, bootloader commands, serial upload).
+- Added `tests/sim`, simavr regression tests (OTA update, bad CRC, bootloader commands, serial upload) that also compare
+  the radio traffic byte for byte with the original bootloader.
 - CI builds the default images for all supported clocks and wirings and runs the simulator tests.
 
 ## v1.3.0-rc.1

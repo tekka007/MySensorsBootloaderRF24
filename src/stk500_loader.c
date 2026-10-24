@@ -8,6 +8,7 @@
 #include "bootloader.h"
 #include "hw.h"
 #include "mys_loader.h"
+#include "ram.h"
 #include "stk500_loader.h"
 #include "stk500_protocol.h"
 
@@ -27,29 +28,28 @@ static void skip_bytes(uint8_t count) {
 	verify_space();
 }
 
-void stk500_loader_run(void) {
+NOINLINE __attribute__((noreturn)) void stk500_loader_run(void) {
 	uint8_t ch;
 	uint16_t address = 0;
 	uint8_t length;
 	uint16_t fw_len = 0;
-	bool done = false;
 
 	uart_init();
 
-	while (!done) {
+	while (1) {
 		wdt_kick();
 		ch = uart_getc();
 
 		if (ch == STK_GET_PARAMETER) {
 			ch = uart_getc();
 			verify_space();
-			if (ch == 0x82) {
-				uart_putc(MYSBOOTLOADER_MINVER);
-			} else if (ch == 0x81) {
-				// out-of-sequence versioning to prevent collisions, see optiboot source
-				uart_putc(MYSBOOTLOADER_MAJVER + 100);
-			} else {
-				uart_putc(0x03);
+			// 0x81 = major version (out-of-sequence numbering to prevent collisions, see optiboot source),
+			// 0x82 = minor version, anything else is answered with 3
+			{
+				uint8_t reply = 3;
+				if (ch == 0x82) reply = MYSBOOTLOADER_MINVER;
+				if (ch == 0x81) reply = MYSBOOTLOADER_MAJVER + 100;
+				uart_putc(reply);
 			}
 		} else if (ch == STK_SET_DEVICE) {
 			skip_bytes(20);
@@ -92,14 +92,16 @@ void stk500_loader_run(void) {
 			uart_putc(SIGNATURE_2);
 		} else if (ch == STK_LEAVE_PROGMODE) {
 			// type and version are not transferred by STK500, store 0xFFFF
-			nodeFirmwareConfig_t config;
-			config.type_command.type = 0xFFFF;
-			config.version_data.version = 0xFFFF;
-			config.blocks = fw_len / FIRMWARE_BLOCK_SIZE;
-			config.crc = flash_crc(config.blocks);
-			mys_save_firmware_config((const uint8_t *)&config);
-			done = true;
+			R->fw_config.type_command.type = 0xFFFF;
+			R->fw_config.version_data.version = 0xFFFF;
+			R->fw_config.blocks = fw_len / FIRMWARE_BLOCK_SIZE;
+			R->fw_config.crc = flash_crc(R->fw_config.blocks);
+			mys_save_firmware_config();
 			verify_space();
+			uart_putc(STK_OK);
+			// programming session over: continue like after any other reset, never return (saves the register
+			// save/restore code a returning function needs)
+			mys_loader_run();
 		} else {
 			verify_space();
 		}
