@@ -12,6 +12,14 @@
 - Fixed `multicompile.sh` never changing the PA level, so every `compiled/*` MIN/LOW/HIGH image was a MAX image.
   The `compiled/` directory is gone; build the variant you need or let CI build all of them.
 - A firmware config with `blocks == 0` is no longer accepted as an update (it requested block `0xFFFF`).
+- The ready-made images in `hex/` are gone: the release workflow (`.github/workflows/release.yml`,
+  `tools/build_release.sh`) builds the four default images from the tagged sources and attaches them, with checksums, to
+  the GitHub release.
+- New `LTO` CMake option (default ON). `-DLTO=OFF` builds with avr-gcc 14, which cannot link the register variable under
+  LTO: 1958 bytes at 16 MHz, all simulator checks pass. A non-blocking CI job reports the size against avr-gcc 7.3.
+- Simulator: counts watchdog resets and checks the watchdog state at application start. `tests/sim/record_golden.sh`
+  reproduces `golden.txt` from the original sources, see `tests/sim/golden.README.md`.
+- Documentation: `docs/SIZE.md` (techniques, toolchains, rejected experiments) and `docs/CONTRIBUTING.md` (rules for changing the code).
 - Image size reduced from 2000-2034 to 1664-1740 bytes (the default configurations dropped by about 300 bytes, 15%):
   no `.data`/`.bss` startup code, all RAM in one struct addressed through a reserved Y register, EEPROM routines and the
   SPM sequence in assembly, a serial loader that continues instead of returning, own small routines instead of libc,

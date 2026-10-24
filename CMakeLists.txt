@@ -13,14 +13,15 @@ option(WATCHDOG_ON_SKETCH_START "Leave the watchdog running when the application
 option(BOOTLOADER_COMMANDS "Enable low level bootloader commands (clear EEPROM, set node/parent id)" ON)
 option(SIZE_CHECK "Fail the build if the image exceeds the boot section" ON)
 option(BOOTLOADER_DEBUG "Show the bootloader state on PORTD" OFF)
+option(LTO "Link-time optimisation: smallest image, but avr-gcc 14 cannot link the register variable with it" ON)
 set(BOOTLOADER_SIZE 2048)
 
-# The sizes in the documentation are for avr-gcc 7.3 (the version Arduino and Debian/Ubuntu ship). Other versions were
-# measured too: 5.4 and 4.9 are about 30 bytes larger, 14 about 75 bytes larger, and 14 cannot link the global register
-# variable (see src/ram.h) with -flto at all.
+# The sizes in the documentation are for avr-gcc 7.3. Other versions were measured too (docs/SIZE.md): 5.4 and 4.9 are
+# about 30 bytes larger, 14 about 230 bytes larger, and 14 cannot link the global register variable (see src/ram.h) with
+# -flto at all, use -DLTO=OFF there.
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 8)
   message(WARNING "avr-gcc ${CMAKE_C_COMPILER_VERSION}: this bootloader is tuned for avr-gcc 7.3, newer versions "
-                  "produce larger images and may fail to build")
+                  "produce larger images and may fail to build (avr-gcc 14: use -DLTO=OFF)")
 endif()
 
 if(NOT BAUD_RATE)
@@ -56,8 +57,11 @@ if(BOOTLOADER_DEBUG)
 endif()
 
 target_compile_options(bootloader PRIVATE
-  -mmcu=${MCU} -std=gnu99 -Os -flto -mrelax -fno-reorder-blocks -fno-tree-dominator-opts -fno-tree-fre -fno-move-loop-invariants -fno-gcse -fira-algorithm=priority -mstrict-X -ffixed-r28 -ffixed-r29 -ffunction-sections -fdata-sections -fpack-struct -fshort-enums
+  -mmcu=${MCU} -std=gnu99 -Os -mrelax -fno-reorder-blocks -fno-tree-dominator-opts -fno-tree-fre -fno-move-loop-invariants -fno-gcse -fira-algorithm=priority -mstrict-X -ffixed-r28 -ffixed-r29 -ffunction-sections -fdata-sections -fpack-struct -fshort-enums
   -funsigned-char -funsigned-bitfields -Wall -Wextra -Wundef -pedantic)
+if(LTO)
+  target_compile_options(bootloader PRIVATE -flto)
+endif()
 target_link_options(bootloader PRIVATE
   -mmcu=${MCU} -nostartfiles -Os -mrelax -Wl,--gc-sections -Wl,-static
   -Wl,-section-start=.text=${BOOTLOADER_START_HEX} -Wl,-Map=$<TARGET_FILE_BASE_NAME:bootloader>.map)

@@ -50,6 +50,8 @@ check ota "downloaded image is in flash" 'flash_crc_1k=1afe image_crc=1afe'
 check ota "firmware config saved" "$fwcfg_ok"
 check ota "node id from controller stored" 'eeprom\[0\.\.2\]=05 '
 check ota "reset flags handed over in r2" 'r2=01'
+check ota "watchdog (8 s) never fired during the ~90 s update" 'wdt_resets=0 '
+check ota "watchdog left running (8 s) for the application" 'wdtcsr=29'
 golden ota
 
 echo "node already up to date"
@@ -57,6 +59,7 @@ run rerun 30
 check rerun "application started" 'started=1'
 check rerun "no block requested" 'blocks_requested=0 '
 check rerun "firmware config unchanged" "$fwcfg_ok"
+check rerun "watchdog never fired, left running for the application" 'wdt_resets=0 wdtcsr=29'
 golden rerun
 
 echo "controller announces a CRC the firmware does not match"
